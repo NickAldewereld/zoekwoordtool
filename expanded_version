@@ -1,0 +1,99 @@
+from google.colab import files
+import io
+import pandas as pd
+import requests
+from tqdm import tqdm
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Upload the file
+uploaded = files.upload()
+
+# Load the file into a DataFrame
+def load_keywords():
+    file_name = next(iter(uploaded))
+    df = pd.read_excel(file_name)
+    keywords = df.iloc[:, 0].tolist()
+    return keywords
+
+# Function to get SERP data
+def get_serp_data(keyword, api_key):
+    try:
+        params = {
+            "engine": "google",
+            "q": keyword,
+            "api_key": api_key
+        }
+        response = requests.get("https://serpapi.com/search", params=params)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching SERP data for {keyword}: {e}")
+        return None
+
+# Function to extract top 10 organic results
+def extract_top_10_links(serp_data):
+    if not serp_data:
+        return []
+    organic_results = serp_data.get("organic_results", [])
+    return [result["link"] for result in organic_results[:10]]
+
+# Main function to process keywords
+def process_keywords(keywords, api_key, threshold=3):
+    serp_results = {}
+    for keyword in tqdm(keywords):
+        serp_data = get_serp_data(keyword, api_key)
+        links = extract_top_10_links(serp_data)
+        serp_results[keyword] = links
+    return cluster_keywords(serp_results, threshold)
+
+# Function to cluster keywords based on link overlap
+def cluster_keywords(serp_results, threshold):
+    clusters = {}
+    keywords = list(serp_results.keys())
+    for i in range(len(keywords)):
+        for j in range(i + 1, len(keywords)):
+            keyword1, keyword2 = keywords[i], keywords[j]
+            links1, links2 = serp_results[keyword1], serp_results[keyword2]
+            overlap = len(set(links1) & set(links2))
+            if overlap >= threshold:
+                if keyword1 not in clusters:
+                    clusters[keyword1] = [keyword1]
+                clusters[keyword1].append(keyword2)
+    return clusters
+
+# Function to save clusters to Excel
+def save_clusters_to_excel(clusters, filename='Clustered_Keywords.xlsx'):
+    rows = []
+    for cluster, keywords in clusters.items():
+        for keyword in keywords:
+            rows.append({"Cluster": cluster, "Keyword": keyword})
+    df = pd.DataFrame(rows)
+    df.to_excel(filename, index=False)
+    print(f"Clustered keywords saved to {filename}")
+
+# Function to visualize clusters
+def visualize_clusters(clusters):
+    cluster_sizes = [len(keywords) for keywords in clusters.values()]
+    plt.figure(figsize=(10, 6))
+    sns.histplot(cluster_sizes, bins=range(1, max(cluster_sizes) + 1))
+    plt.xlabel('Cluster Size')
+    plt.ylabel('Frequency')
+    plt.title('Distribution of Keyword Cluster Sizes')
+    plt.show()
+
+# User input for API key and clustering threshold
+api_key = input("Enter your SerpAPI key: ")
+threshold = int(input("Enter the clustering threshold (number of overlapping links): "))
+
+# Load keywords
+keywords = load_keywords()
+
+# Process keywords and cluster them
+clusters = process_keywords(keywords, api_key, threshold)
+
+# Save the clusters to an Excel file
+save_clusters_to_excel(clusters)
+
+# Visualize the clusters
+visualize_clusters(clusters)
